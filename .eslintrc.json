@@ -6,15 +6,23 @@
   "extends": [
     "eslint:recommended",
     "@typescript-eslint/recommended",
-    "plugin:react-hooks/recommended"
+    "plugin:react-hooks/recommended",
+    "plugin:storybook/recommended"
   ],
-  "ignorePatterns": ["dist", ".eslintrc.json"],
+  "ignorePatterns": [
+    "dist",
+    ".eslintrc.json"
+  ],
   "parser": "@typescript-eslint/parser",
-  "plugins": ["react-refresh"],
+  "plugins": [
+    "react-refresh"
+  ],
   "rules": {
     "react-refresh/only-export-components": [
       "warn",
-      { "allowConstantExport": true }
+      {
+        "allowConstantExport": true
+      }
     ]
   }
 }
