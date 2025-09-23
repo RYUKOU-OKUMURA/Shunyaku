@@ -1,5 +1,8 @@
+/// <reference lib="webworker" />
+
 // Tesseract.js Web Worker
 import { createWorker, Worker as TesseractWorker } from 'tesseract.js';
+import type { OEM, PSM } from 'tesseract.js';
 import { OCRResult, OCRConfig, ImageInput, ApiResponse, PerformanceMetrics } from '../types';
 
 // ワーカー間通信用のメッセージ型定義
@@ -100,8 +103,8 @@ class OCRWorkerManager {
 
       // Tesseract.jsのオプションを設定
       await this.worker.setParameters({
-        tessedit_pageseg_mode: config.psm.toString(),
-        tessedit_ocr_engine_mode: config.oem.toString(),
+        tessedit_pageseg_mode: config.psm as unknown as PSM,
+        tessedit_ocr_engine_mode: config.oem as unknown as OEM,
         tessedit_char_whitelist: '', // 必要に応じて文字制限を設定
       });
 
@@ -201,7 +204,7 @@ class OCRWorkerManager {
         // 小さなテスト画像でOCRを実行してキャッシュを準備
         const testImage = this.createTestImage();
         const config: OCRConfig = {
-          language: lang as any,
+          language: lang as 'eng' | 'jpn' | 'eng+jpn',
           psm: 3,
           oem: 1,
           preprocessingEnabled: false,
@@ -324,9 +327,7 @@ if (typeof importScripts !== 'undefined') {
       } as OCRWorkerResponse);
     }
   };
-} else {
-  // メインスレッド環境 - OCRサービス用のクラスをエクスポート
-  export { OCRWorkerManager };
 }
 
+export { OCRWorkerManager };
 export default OCRWorkerManager;

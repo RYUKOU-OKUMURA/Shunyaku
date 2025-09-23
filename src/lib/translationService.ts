@@ -95,7 +95,7 @@ export class TranslationService {
         },
       };
     } catch (error) {
-      const processingTime = Date.now() - startTime;
+      // Processing time would be calculated here if needed
 
       if (error instanceof DeepLApiError) {
         return {

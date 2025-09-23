@@ -15,8 +15,8 @@ export const DropZone: React.FC<DropZoneProps> = ({
     setError(null);
 
     // ファイル形式チェック
-    const extension = file.name.split('.').pop()?.toLowerCase();
-    if (!extension || !acceptedFormats.includes(extension as any)) {
+    const extension = file.name.split('.').pop()?.toLowerCase() as 'png' | 'jpg' | 'jpeg' | 'pdf';
+    if (!extension || !acceptedFormats.includes(extension)) {
       setError(`対応していないファイル形式です。${acceptedFormats.join(', ')} のファイルを選択してください。`);
       return false;
     }
@@ -38,7 +38,7 @@ export const DropZone: React.FC<DropZoneProps> = ({
       const arrayBuffer = await file.arrayBuffer();
       const imageData: ImageInput = {
         data: arrayBuffer,
-        format: file.name.split('.').pop()?.toLowerCase() as any,
+        format: file.name.split('.').pop()?.toLowerCase() as 'png' | 'jpg' | 'jpeg' | 'pdf',
         width: 0, // 実際のアプリでは画像を読み込んで取得
         height: 0, // 実際のアプリでは画像を読み込んで取得
         size: file.size,
@@ -68,7 +68,7 @@ export const DropZone: React.FC<DropZoneProps> = ({
         imageData.height = 1200;
         onImageDrop(imageData);
       }
-    } catch (err) {
+    } catch {
       setError('ファイルの処理中にエラーが発生しました。');
     }
   }, [validateFile, onImageDrop]);

@@ -1,5 +1,5 @@
 // OCR サービス統合マネージャー
-import { OCRResult, OCRConfig, ImageInput, ApiResponse, PerformanceMetrics } from '../types';
+import { OCRResult, OCRConfig, ImageInput, ApiResponse } from '../types';
 import { OCRWorkerMessage, OCRWorkerResponse } from '../workers/ocrWorker';
 
 export class OCRService {
@@ -7,8 +7,8 @@ export class OCRService {
   private isInitialized = false;
   private messageId = 0;
   private pendingMessages = new Map<string, {
-    resolve: (value: any) => void;
-    reject: (error: any) => void;
+    resolve: (value: any) => void; // eslint-disable-line @typescript-eslint/no-explicit-any
+    reject: (error: Error) => void;
   }>();
 
   constructor() {
@@ -76,10 +76,11 @@ export class OCRService {
         pending.resolve(undefined);
         break;
 
-      case 'ERROR':
+      case 'ERROR': {
         const error = new Error(payload?.error || 'Unknown worker error');
         pending.reject(error);
         break;
+      }
 
       default:
         pending.reject(new Error(`Unknown response type: ${type}`));
@@ -323,7 +324,7 @@ export class OCRService {
             textLength: 0,
           });
         }
-      } catch (error) {
+      } catch {
         const endTime = Date.now();
         const duration = endTime - startTime;
 

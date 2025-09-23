@@ -36,7 +36,7 @@ const TesseractPerformanceTest: React.FC = () => {
 
   const measureMemoryUsage = () => {
     if ('memory' in performance) {
-      const memInfo = (performance as any).memory;
+      const memInfo = (performance as { memory: { usedJSHeapSize: number; totalJSHeapSize: number; jsHeapSizeLimit: number } }).memory;
       return {
         used: memInfo.usedJSHeapSize,
         total: memInfo.totalJSHeapSize,

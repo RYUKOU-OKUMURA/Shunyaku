@@ -113,7 +113,7 @@ export interface AppError {
   message: string;
   details?: unknown;
   timestamp: Date;
-  context: 'ocr' | 'translation' | 'ui' | 'storage' | 'network';
+  context: 'ocr' | 'translation' | 'ui' | 'storage' | 'network' | 'clipboard';
 }
 
 // パフォーマンス計測
@@ -210,7 +210,7 @@ export interface BaseComponentProps {
 // 再利用可能なコンポーネント用の型
 export interface DropZoneProps extends BaseComponentProps {
   onImageDrop: (image: ImageInput) => void;
-  acceptedFormats: ('png' | 'jpg' | 'jpeg' | 'pdf')[];
+  acceptedFormats?: ('png' | 'jpg' | 'jpeg' | 'pdf')[];
   disabled?: boolean;
 }
 

@@ -1,5 +1,5 @@
 // クリップボード監視サービス
-import { invoke } from '@tauri-apps/api/tauri';
+import { invoke } from '@tauri-apps/api/core';
 import { ImageInput, ApiResponse } from '../types';
 
 export interface ClipboardImageData {
@@ -10,7 +10,7 @@ export interface ClipboardImageData {
 
 export class ClipboardService {
   private isMonitoring = false;
-  private monitoringInterval: NodeJS.Timeout | null = null;
+  private monitoringInterval: ReturnType<typeof setInterval> | null = null;
   private lastClipboardHash: string | null = null;
   private callbacks: Array<(data: ClipboardImageData) => void> = [];
 
@@ -122,7 +122,7 @@ export class ClipboardService {
       // Tauriのclipboard-managerプラグインを使用
       const text = await invoke('plugin:clipboard-manager|read_text');
       return text as string;
-    } catch (error) {
+    } catch {
       // テキストがない場合やエラーの場合
       return null;
     }
