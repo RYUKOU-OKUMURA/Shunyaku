@@ -16,6 +16,10 @@
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:run": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report",
+    "test:all": "npm run test:run && npm run test:e2e",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build"
   },
@@ -29,6 +33,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
     "@eslint/js": "^9.36.0",
+    "@playwright/test": "^1.55.1",
     "@storybook/addon-essentials": "^8.1.0",
     "@storybook/addon-interactions": "^8.1.0",
     "@storybook/addon-links": "^8.1.0",
@@ -50,6 +55,7 @@
     "eslint-plugin-react-refresh": "^0.4.21",
     "eslint-plugin-storybook": "^0.8.0",
     "jsdom": "^27.0.0",
+    "playwright": "^1.55.1",
     "postcss": "^8.4.33",
     "prettier": "^3.6.2",
     "storybook": "^8.1.0",
