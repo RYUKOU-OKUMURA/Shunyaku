@@ -1,5 +1,5 @@
 // エンドツーエンドパイプライン統合サービス
-import { ImageInput, OCRConfig, TranslationRequest, ApiResponse } from '../types';
+import { ImageInput, OCRConfig, TranslationRequest } from '../types';
 import { ocrService } from './ocrService';
 import { translationService } from './translationService';
 

@@ -11,6 +11,7 @@ import { MockPipelineService } from '../lib/mockServices';
 
 interface PipelinePrototypeProps {
   onOpenTests?: () => void;
+  onOpenUIDemo?: () => void;
 }
 
 type PipelineHistoryItem = {
@@ -37,7 +38,7 @@ const languageOptions = [
   { value: 'fr', label: 'French' },
 ];
 
-const PipelinePrototype: React.FC<PipelinePrototypeProps> = ({ onOpenTests }) => {
+const PipelinePrototype: React.FC<PipelinePrototypeProps> = ({ onOpenTests, onOpenUIDemo }) => {
   const [ocrConfig, setOcrConfig] = useState<OCRConfig>(defaultOcrConfig);
   const [sourceLang, setSourceLang] = useState('en');
   const [targetLang, setTargetLang] = useState('ja');
@@ -241,15 +242,26 @@ const PipelinePrototype: React.FC<PipelinePrototypeProps> = ({ onOpenTests }) =>
               Drop an image to run the OCR → Translation pipeline. Toggle failure simulation to verify error handling.
             </p>
           </div>
-          {onOpenTests && (
-            <button
-              onClick={onOpenTests}
-              className="self-start md:self-auto inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100"
-              type="button"
-            >
-              📊 Open Performance Tests
-            </button>
-          )}
+          <div className="flex gap-2">
+            {onOpenUIDemo && (
+              <button
+                onClick={onOpenUIDemo}
+                className="self-start md:self-auto inline-flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm font-medium text-green-700 hover:bg-green-100"
+                type="button"
+              >
+                🎨 UI Components Demo
+              </button>
+            )}
+            {onOpenTests && (
+              <button
+                onClick={onOpenTests}
+                className="self-start md:self-auto inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100"
+                type="button"
+              >
+                📊 Performance Tests
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
