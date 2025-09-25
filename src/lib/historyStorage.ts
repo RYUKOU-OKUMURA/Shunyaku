@@ -84,7 +84,7 @@ class HistoryStorageService {
     }
 
     const item: TranslationHistoryItem = {
-      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
       originalText: originalText.trim(),
       translatedText: translatedText.trim(),
       sourceLanguage,

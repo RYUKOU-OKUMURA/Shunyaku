@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { SettingsModalProps, AppSettings, OCRConfig, TranslationConfig, UISettings, HotkeySettings } from '../types';
+import TranslationHistorySearch from './TranslationHistorySearch';
+import type { TranslationHistoryItem } from '../lib/historyStorage';
 
 const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
@@ -9,22 +11,22 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   className = '',
 }) => {
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
-  const [activeTab, setActiveTab] = useState<'general' | 'ocr' | 'translation' | 'hotkeys' | 'export'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'ocr' | 'translation' | 'hotkeys' | 'history' | 'export'>('general');
 
   // Update local settings when props change
   useEffect(() => {
     setLocalSettings(settings);
   }, [settings]);
 
-  const handleSave = () => {
+  const handleSave = useCallback(() => {
     onSettingsChange(localSettings);
     onClose();
-  };
+  }, [localSettings, onSettingsChange, onClose]);
 
-  const handleCancel = () => {
+  const handleCancel = useCallback(() => {
     setLocalSettings(settings); // Reset to original settings
     onClose();
-  };
+  }, [settings, onClose]);
 
   // Handle escape key
   useEffect(() => {
@@ -80,6 +82,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     { id: 'ocr' as const, label: 'OCR', icon: '👁️' },
     { id: 'translation' as const, label: 'Translation', icon: '🌐' },
     { id: 'hotkeys' as const, label: 'Hotkeys', icon: '⌨️' },
+    { id: 'history' as const, label: 'History', icon: '📋' },
     { id: 'export' as const, label: 'Export', icon: '💾' },
   ];
 
@@ -92,15 +95,21 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
       />
 
       {/* Modal */}
-      <div className={`relative bg-white rounded-xl shadow-2xl w-full max-w-4xl h-full max-h-[90vh] flex flex-col ${className}`}>
+      <div
+        className={`relative bg-white rounded-xl shadow-2xl w-full max-w-4xl h-full max-h-[90vh] flex flex-col ${className}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-modal-title"
+      >
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <h2 className="text-2xl font-bold text-gray-900">Settings</h2>
+          <h2 id="settings-modal-title" className="text-2xl font-bold text-gray-900">Settings</h2>
           <button
             onClick={handleCancel}
             className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            aria-label="闉じる"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
@@ -223,7 +232,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                       </label>
                       <select
                         value={localSettings.ocr.psm}
-                        onChange={(e) => updateOcrSettings({ psm: parseInt(e.target.value) })}
+                        onChange={(e) => updateOcrSettings({ psm: parseInt(e.target.value, 10) })}
                         className="w-full rounded-lg border-gray-300 focus:border-blue-500 focus:ring-blue-500"
                       >
                         <option value="3">3 - Fully automatic page segmentation</option>
@@ -240,7 +249,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                       </label>
                       <select
                         value={localSettings.ocr.oem}
-                        onChange={(e) => updateOcrSettings({ oem: parseInt(e.target.value) })}
+                        onChange={(e) => updateOcrSettings({ oem: parseInt(e.target.value, 10) })}
                         className="w-full rounded-lg border-gray-300 focus:border-blue-500 focus:ring-blue-500"
                       >
                         <option value="0">0 - Legacy engine only</option>
@@ -425,6 +434,49 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                       <div className="text-sm text-yellow-700">
                         <p className="font-medium">Global shortcuts require system permissions</p>
                         <p>Make sure to grant accessibility permissions to the app in System Preferences.</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'history' && (
+              <div className="space-y-6">
+                <h3 className="text-xl font-semibold text-gray-900">Translation History</h3>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-3">
+                      Search Translation History
+                    </label>
+                    <TranslationHistorySearch
+                      placeholder="原文または翻訳から検索..."
+                      maxResults={8}
+                      onItemSelect={async (item: TranslationHistoryItem) => {
+                        try {
+                          await navigator.clipboard.writeText(item.translatedText);
+                          console.log('Selected and copied:', item);
+                          // TODO: Show toast notification for success
+                        } catch (error) {
+                          console.error('Failed to copy to clipboard:', error);
+                          // TODO: Show error toast notification
+                        }
+                      }}
+                      className="w-full"
+                    />
+                  </div>
+
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                    <div className="flex items-start">
+                      <span className="text-yellow-600 mr-2">💡</span>
+                      <div className="text-sm text-yellow-800">
+                        <p className="font-medium">Tips:</p>
+                        <ul className="list-disc list-inside mt-1 space-y-1">
+                          <li>履歴項目をクリックすると翻訳文がクリップボードにコピーされます</li>
+                          <li>最新の10件まで自動保存されます</li>
+                          <li>原文・翻訳文の両方から部分一致検索が可能です</li>
+                        </ul>
                       </div>
                     </div>
                   </div>
