@@ -67,8 +67,14 @@ class OCRWorkerManager {
             console.debug(`OCR Progress: ${(m.progress * 100).toFixed(1)}%`);
           }
         },
-        cachePath: './tessdata', // 言語データキャッシュパス
+        // ローカルアセットを使用（CDN依存を回避）
+        langPath: '/tessdata', // publicディレクトリのtessdata
         gzip: true, // 圧縮を有効化
+      });
+
+      // ワーカー作成後にパラメーターを設定
+      await this.worker.setParameters({
+        preserve_interword_spaces: '1',
       });
 
       console.log(`OCR Worker initialized with languages: ${languages}`);
@@ -174,7 +180,14 @@ class OCRWorkerManager {
     if (image.data instanceof ArrayBuffer) {
       // ArrayBufferの場合はBlob経由でURLを作成
       const blob = new Blob([image.data], { type: `image/${image.format}` });
-      return URL.createObjectURL(blob);
+      const url = URL.createObjectURL(blob);
+
+      // 使用後にメモリリークを防ぐためのクリーンアップを登録
+      // Note: OCR完了後にrevokeObjectURLが呼ばれるはずだが、
+      // 念のためタイムアウト付きのフォールバックも設定
+      setTimeout(() => URL.revokeObjectURL(url), 30000); // 30秒後にクリーンアップ
+
+      return url;
     }
 
     throw new Error('Unsupported image data format');
@@ -194,41 +207,108 @@ class OCRWorkerManager {
     return estimatedMemory + tesseractOverhead;
   }
 
-  // ワーカーのウォームアップ
+  // ワーカーのウォームアップ（シーケンシャル実行で競合を回避）
   async warmUp(languages: string[] = ['eng', 'jpn']): Promise<void> {
-    for (const lang of languages) {
-      try {
-        console.log(`Warming up OCR worker for language: ${lang}`);
-        await this.initialize(lang);
+    const warmupStartTime = Date.now();
+    console.log('Starting OCR worker warm-up process...');
 
-        // 小さなテスト画像でOCRを実行してキャッシュを準備
-        const testImage = this.createTestImage();
+    // 複合言語で一度だけ初期化（eng+jpnなど）
+    const combinedLanguages = languages.join('+');
+
+    try {
+      console.log(`Warming up OCR worker for combined languages: ${combinedLanguages}`);
+
+      await this.initialize(combinedLanguages);
+
+      // 複数サイズのテスト画像でウォームアップ
+      const testImages = [
+        this.createTestImage('small'), // 100x40
+        this.createTestImage('medium'), // 300x100
+        this.createTestImage('large'), // 600x200
+      ];
+
+      for (const testImage of testImages) {
         const config: OCRConfig = {
-          language: lang as 'eng' | 'jpn' | 'eng+jpn',
+          language: combinedLanguages as 'eng' | 'jpn' | 'eng+jpn',
           psm: 3,
           oem: 1,
           preprocessingEnabled: false,
         };
 
         await this.recognizeText(testImage, config);
-        console.log(`OCR worker warmed up for language: ${lang}`);
-      } catch (error) {
-        console.warn(`Failed to warm up OCR worker for language ${lang}:`, error);
       }
+
+      const totalWarmupTime = Date.now() - warmupStartTime;
+      console.log(`OCR worker warm-up completed successfully (${totalWarmupTime}ms)`);
+    } catch (error) {
+      console.error(`Failed to warm up OCR worker:`, error);
+      throw error;
     }
   }
 
-  // テスト用の小さな画像を作成
-  private createTestImage(): ImageInput {
-    // 小さなテスト画像のBase64データ（白背景に"Test"という文字）
-    const testImageBase64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
+  // テスト用の画像を作成（サイズ別）
+  private createTestImage(size: 'small' | 'medium' | 'large' = 'small'): ImageInput {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) {
+      // Fallback: 最小限のテスト画像
+      const testImageBase64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
+      return {
+        data: testImageBase64,
+        format: 'png',
+        width: 1,
+        height: 1,
+        size: testImageBase64.length,
+      };
+    }
+
+    // サイズとテキストを設定
+    let width: number, height: number, text: string, fontSize: number;
+    switch (size) {
+      case 'small':
+        width = 100;
+        height = 40;
+        text = 'Test';
+        fontSize = 14;
+        break;
+      case 'medium':
+        width = 300;
+        height = 100;
+        text = 'OCR Warm-up Test';
+        fontSize = 20;
+        break;
+      case 'large':
+        width = 600;
+        height = 200;
+        text = 'Large OCR Performance Test Image';
+        fontSize = 24;
+        break;
+    }
+
+    canvas.width = width;
+    canvas.height = height;
+
+    // 白背景
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, width, height);
+
+    // 黒いテキスト
+    ctx.fillStyle = 'black';
+    ctx.font = `${fontSize}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, width / 2, height / 2);
+
+    // Base64に変換
+    const dataUrl = canvas.toDataURL('image/png');
 
     return {
-      data: testImageBase64,
+      data: dataUrl,
       format: 'png',
-      width: 100,
-      height: 50,
-      size: 1024, // 小さなサイズ
+      width,
+      height,
+      size: dataUrl.length,
     };
   }
 

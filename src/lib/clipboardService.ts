@@ -237,7 +237,7 @@ export class ClipboardService {
       image: image ? {
         size: image.size,
         format: image.format,
-        timestamp: Date.now(),
+        // timestampを削除して安定したハッシュを生成
       } : null,
     };
 

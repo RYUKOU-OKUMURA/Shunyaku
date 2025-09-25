@@ -190,7 +190,7 @@ export class OCRService {
     }
   }
 
-  // 画像前処理
+  // 画像前処理（リサイズ + 二値化）
   private async preprocessImage(image: ImageInput): Promise<ImageInput> {
     try {
       // Canvas APIを使用して画像前処理を実行
@@ -204,28 +204,53 @@ export class OCRService {
       // 画像を読み込み
       const img = await this.loadImage(image);
 
-      // キャンバスサイズを設定
-      canvas.width = img.width;
-      canvas.height = img.height;
+      // リサイズ計算（性能向上のため最大幅/高さを制限）
+      const maxWidth = 2000;
+      const maxHeight = 2000;
+      let { width, height } = img;
 
-      // 画像を描画
-      ctx.drawImage(img, 0, 0);
+      if (width > maxWidth || height > maxHeight) {
+        const aspectRatio = width / height;
+        if (aspectRatio > 1) {
+          width = Math.min(width, maxWidth);
+          height = width / aspectRatio;
+        } else {
+          height = Math.min(height, maxHeight);
+          width = height * aspectRatio;
+        }
+      }
+
+      // キャンバスサイズを設定
+      canvas.width = Math.round(width);
+      canvas.height = Math.round(height);
+
+      // 画像スムージングを無効化（テキスト処理に最適化）
+      ctx.imageSmoothingEnabled = false;
+
+      // リサイズして描画
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
       // 画像データを取得
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const data = imageData.data;
 
-      // グレースケール変換とコントラスト向上
+      // グレースケール変換と適応的二値化
+      const grayValues: number[] = [];
       for (let i = 0; i < data.length; i += 4) {
         const r = data[i];
         const g = data[i + 1];
         const b = data[i + 2];
+        const gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+        grayValues.push(gray);
+      }
 
-        // グレースケール変換
-        const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+      // Otsu の閾値を簡易計算
+      const threshold = this.calculateOtsuThreshold(grayValues);
 
-        // コントラスト向上（簡易的な二値化）
-        const enhanced = gray > 128 ? 255 : 0;
+      // 二値化を適用
+      for (let i = 0; i < data.length; i += 4) {
+        const grayIndex = Math.floor(i / 4);
+        const enhanced = grayValues[grayIndex] > threshold ? 255 : 0;
 
         data[i] = enhanced;     // R
         data[i + 1] = enhanced; // G
@@ -252,19 +277,74 @@ export class OCRService {
     }
   }
 
+  // Otsu の閾値計算（簡易版）
+  private calculateOtsuThreshold(grayValues: number[]): number {
+    const histogram = new Array(256).fill(0);
+    grayValues.forEach(val => histogram[val]++);
+
+    const total = grayValues.length;
+    let sum = 0;
+    for (let i = 0; i < 256; i++) {
+      sum += i * histogram[i];
+    }
+
+    let sumB = 0;
+    let wB = 0;
+    let wF = 0;
+    let varMax = 0;
+    let threshold = 0;
+
+    for (let t = 0; t < 256; t++) {
+      wB += histogram[t];
+      if (wB === 0) continue;
+
+      wF = total - wB;
+      if (wF === 0) break;
+
+      sumB += t * histogram[t];
+
+      const mB = sumB / wB;
+      const mF = (sum - sumB) / wF;
+
+      const varBetween = wB * wF * (mB - mF) * (mB - mF);
+
+      if (varBetween > varMax) {
+        varMax = varBetween;
+        threshold = t;
+      }
+    }
+
+    return threshold;
+  }
+
   // 画像を読み込み
   private loadImage(image: ImageInput): Promise<HTMLImageElement> {
     return new Promise((resolve, reject) => {
       const img = new Image();
+      let objectUrl: string | null = null;
 
-      img.onload = () => resolve(img);
-      img.onerror = reject;
+      img.onload = () => {
+        // 作成したObjectURLをクリーンアップ
+        if (objectUrl) {
+          URL.revokeObjectURL(objectUrl);
+        }
+        resolve(img);
+      };
+
+      img.onerror = (error) => {
+        // 作成したObjectURLをクリーンアップ
+        if (objectUrl) {
+          URL.revokeObjectURL(objectUrl);
+        }
+        reject(error);
+      };
 
       if (typeof image.data === 'string') {
         img.src = image.data;
       } else {
         const blob = new Blob([image.data], { type: `image/${image.format}` });
-        img.src = URL.createObjectURL(blob);
+        objectUrl = URL.createObjectURL(blob);
+        img.src = objectUrl;
       }
     });
   }
