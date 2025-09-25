@@ -15,6 +15,19 @@ export interface OCRConfig {
   psm: number; // Page Segmentation Mode
   oem: number; // OCR Engine Mode
   preprocessingEnabled: boolean;
+  confidenceThreshold: number;
+  preprocessingOptions?: ImagePreprocessingOptions;
+}
+
+export interface ImagePreprocessingOptions {
+  enhanceContrast: boolean;
+  contrastFactor: number; // 1.0 = no change, >1.0 = increase, <1.0 = decrease
+  denoiseEnabled: boolean;
+  denoiseStrength: 'light' | 'medium' | 'strong';
+  sharpenEnabled: boolean;
+  sharpenStrength: number; // 0.0-2.0
+  gammaCorrection: boolean;
+  gammaValue: number; // 0.5-3.0, default 1.0
 }
 
 // 翻訳関連の型定義

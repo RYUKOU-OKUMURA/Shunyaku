@@ -47,6 +47,8 @@ export class PipelineIntegrationService {
   constructor(
     private defaultOcrConfig: OCRConfig = {
       language: 'eng+jpn',
+      psm: 6,
+      oem: 3,
       preprocessingEnabled: true,
       confidenceThreshold: 0.6,
     },

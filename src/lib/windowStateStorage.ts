@@ -246,7 +246,10 @@ class WindowStateStorageService {
   /**
    * Center window on screen
    */
-  centerWindowOnScreen(windowId: keyof WindowStates, state: WindowState): WindowState {
+  centerWindowOnScreen(
+    windowId: keyof WindowStates,
+    state: WindowState
+  ): WindowState {
     if (typeof window === 'undefined' || !window.screen) {
       return state
     }

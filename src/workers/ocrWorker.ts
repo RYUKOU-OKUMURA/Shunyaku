@@ -233,6 +233,7 @@ class OCRWorkerManager {
           psm: 3,
           oem: 1,
           preprocessingEnabled: false,
+          confidenceThreshold: 0.6,
         };
 
         await this.recognizeText(testImage, config);

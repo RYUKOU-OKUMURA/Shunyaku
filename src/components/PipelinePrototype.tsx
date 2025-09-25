@@ -12,6 +12,7 @@ import { MockPipelineService } from '../lib/mockServices';
 interface PipelinePrototypeProps {
   onOpenTests?: () => void;
   onOpenUIDemo?: () => void;
+  onOpenPreprocessingTest?: () => void;
 }
 
 type PipelineHistoryItem = {
@@ -29,6 +30,7 @@ const defaultOcrConfig: OCRConfig = {
   psm: 3,
   oem: 1,
   preprocessingEnabled: true,
+  confidenceThreshold: 0.6,
 };
 
 const languageOptions = [
@@ -38,7 +40,7 @@ const languageOptions = [
   { value: 'fr', label: 'French' },
 ];
 
-const PipelinePrototype: React.FC<PipelinePrototypeProps> = ({ onOpenTests, onOpenUIDemo }) => {
+const PipelinePrototype: React.FC<PipelinePrototypeProps> = ({ onOpenTests, onOpenUIDemo, onOpenPreprocessingTest }) => {
   const [ocrConfig, setOcrConfig] = useState<OCRConfig>(defaultOcrConfig);
   const [sourceLang, setSourceLang] = useState('en');
   const [targetLang, setTargetLang] = useState('ja');
@@ -243,6 +245,15 @@ const PipelinePrototype: React.FC<PipelinePrototypeProps> = ({ onOpenTests, onOp
             </p>
           </div>
           <div className="flex gap-2">
+            {onOpenPreprocessingTest && (
+              <button
+                onClick={onOpenPreprocessingTest}
+                className="self-start md:self-auto inline-flex items-center gap-2 rounded-lg border border-purple-200 bg-purple-50 px-4 py-2 text-sm font-medium text-purple-700 hover:bg-purple-100"
+                type="button"
+              >
+                🔧 Advanced Preprocessing (Phase 5-1)
+              </button>
+            )}
             {onOpenUIDemo && (
               <button
                 onClick={onOpenUIDemo}

@@ -1,5 +1,5 @@
 // OCR サービス統合マネージャー
-import { OCRResult, OCRConfig, ImageInput, ApiResponse } from '../types';
+import { OCRResult, OCRConfig, ImageInput, ApiResponse, ImagePreprocessingOptions } from '../types';
 import { OCRWorkerMessage, OCRWorkerResponse } from '../workers/ocrWorker';
 
 export class OCRService {
@@ -161,7 +161,7 @@ export class OCRService {
 
       // 画像前処理（必要に応じて）
       const processedImage = config.preprocessingEnabled
-        ? await this.preprocessImage(image)
+        ? await this.preprocessImage(image, config.preprocessingOptions)
         : image;
 
       // OCR実行
@@ -368,9 +368,25 @@ export class OCRService {
     return false;
   }
 
-  // 画像前処理（リサイズ + 二値化）
-  private async preprocessImage(image: ImageInput): Promise<ImageInput> {
+  // 高度な画像前処理（リサイズ + コントラスト + ノイズ除去 + 二値化）
+  private async preprocessImage(
+    image: ImageInput,
+    options?: ImagePreprocessingOptions
+  ): Promise<ImageInput> {
     try {
+      const defaultOptions: ImagePreprocessingOptions = {
+        enhanceContrast: true,
+        contrastFactor: 1.2,
+        denoiseEnabled: true,
+        denoiseStrength: 'medium',
+        sharpenEnabled: true,
+        sharpenStrength: 0.5,
+        gammaCorrection: true,
+        gammaValue: 1.1,
+      };
+
+      const preprocessingOptions = { ...defaultOptions, ...options };
+
       // Canvas APIを使用して画像前処理を実行
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
@@ -409,32 +425,10 @@ export class OCRService {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
       // 画像データを取得
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imageData.data;
+      let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-      // グレースケール変換と適応的二値化
-      const grayValues: number[] = [];
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-        const gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
-        grayValues.push(gray);
-      }
-
-      // Otsu の閾値を簡易計算
-      const threshold = this.calculateOtsuThreshold(grayValues);
-
-      // 二値化を適用
-      for (let i = 0; i < data.length; i += 4) {
-        const grayIndex = Math.floor(i / 4);
-        const enhanced = grayValues[grayIndex] > threshold ? 255 : 0;
-
-        data[i] = enhanced;     // R
-        data[i + 1] = enhanced; // G
-        data[i + 2] = enhanced; // B
-        // A (alpha) はそのまま
-      }
+      // 各種前処理を順次適用
+      imageData = this.applyAdvancedPreprocessing(imageData, preprocessingOptions);
 
       // 処理済み画像データをキャンバスに戻す
       ctx.putImageData(imageData, 0, 0);
@@ -455,7 +449,201 @@ export class OCRService {
     }
   }
 
-  // Otsu の閾値計算（簡易版）
+  // 高度な画像前処理を適用
+  private applyAdvancedPreprocessing(
+    imageData: ImageData,
+    options: ImagePreprocessingOptions
+  ): ImageData {
+    const data = imageData.data;
+    const width = imageData.width;
+    const height = imageData.height;
+
+    // 1. ガンマ補正（明度調整）
+    if (options.gammaCorrection) {
+      this.applyGammaCorrection(data, options.gammaValue);
+    }
+
+    // 2. コントラスト強化
+    if (options.enhanceContrast) {
+      this.applyContrastEnhancement(data, options.contrastFactor);
+    }
+
+    // 3. ノイズ除去
+    if (options.denoiseEnabled) {
+      this.applyDenoising(data, width, height, options.denoiseStrength);
+    }
+
+    // 4. シャープニング
+    if (options.sharpenEnabled) {
+      this.applySharpening(data, width, height, options.sharpenStrength);
+    }
+
+    // 5. 適応的二値化（最後に適用）
+    this.applyAdaptiveBinarization(data, width, height);
+
+    return imageData;
+  }
+
+  // ガンマ補正を適用
+  private applyGammaCorrection(data: Uint8ClampedArray, gamma: number): void {
+    // ガンマテーブルを事前計算
+    const gammaTable = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) {
+      gammaTable[i] = Math.round(255 * Math.pow(i / 255, 1 / gamma));
+    }
+
+    // 各ピクセルに適用
+    for (let i = 0; i < data.length; i += 4) {
+      data[i] = gammaTable[data[i]];         // R
+      data[i + 1] = gammaTable[data[i + 1]]; // G
+      data[i + 2] = gammaTable[data[i + 2]]; // B
+      // Alpha はそのまま
+    }
+  }
+
+  // コントラスト強化を適用
+  private applyContrastEnhancement(data: Uint8ClampedArray, factor: number): void {
+    for (let i = 0; i < data.length; i += 4) {
+      // RGBをグレースケールに変換してコントラストを調整
+      const gray = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+
+      // コントラスト調整：(value - 128) * factor + 128
+      const enhanced = Math.round((gray - 128) * factor + 128);
+      const clampedValue = Math.max(0, Math.min(255, enhanced));
+
+      data[i] = clampedValue;     // R
+      data[i + 1] = clampedValue; // G
+      data[i + 2] = clampedValue; // B
+    }
+  }
+
+  // ノイズ除去を適用（Gaussianブラー + メディアンフィルター）
+  private applyDenoising(
+    data: Uint8ClampedArray,
+    width: number,
+    height: number,
+    strength: 'light' | 'medium' | 'strong'
+  ): void {
+    const kernelSize = strength === 'light' ? 3 : strength === 'medium' ? 5 : 7;
+    const radius = Math.floor(kernelSize / 2);
+
+    // グレースケール変換済みのデータをコピー
+    const originalData = new Uint8ClampedArray(data);
+
+    // メディアンフィルターを適用
+    for (let y = radius; y < height - radius; y++) {
+      for (let x = radius; x < width - radius; x++) {
+        const values: number[] = [];
+
+        // カーネル範囲内のピクセル値を収集
+        for (let ky = -radius; ky <= radius; ky++) {
+          for (let kx = -radius; kx <= radius; kx++) {
+            const pixelIndex = ((y + ky) * width + (x + kx)) * 4;
+            values.push(originalData[pixelIndex]); // R値（グレースケール）
+          }
+        }
+
+        // メディアン値を計算
+        values.sort((a, b) => a - b);
+        const median = values[Math.floor(values.length / 2)];
+
+        const pixelIndex = (y * width + x) * 4;
+        data[pixelIndex] = median;     // R
+        data[pixelIndex + 1] = median; // G
+        data[pixelIndex + 2] = median; // B
+      }
+    }
+  }
+
+  // シャープニングを適用（Unsharp Mask）
+  private applySharpening(
+    data: Uint8ClampedArray,
+    width: number,
+    height: number,
+    strength: number
+  ): void {
+    const originalData = new Uint8ClampedArray(data);
+
+    // ラプラシアンカーネル（エッジ検出）
+    const kernel = [
+      [0, -1, 0],
+      [-1, 5, -1],
+      [0, -1, 0]
+    ];
+
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        let sum = 0;
+
+        // カーネル適用
+        for (let ky = -1; ky <= 1; ky++) {
+          for (let kx = -1; kx <= 1; kx++) {
+            const pixelIndex = ((y + ky) * width + (x + kx)) * 4;
+            sum += originalData[pixelIndex] * kernel[ky + 1][kx + 1];
+          }
+        }
+
+        // シャープニング強度を適用
+        const pixelIndex = (y * width + x) * 4;
+        const originalValue = originalData[pixelIndex];
+        const sharpenedValue = Math.round(originalValue + (sum - originalValue) * strength);
+        const clampedValue = Math.max(0, Math.min(255, sharpenedValue));
+
+        data[pixelIndex] = clampedValue;     // R
+        data[pixelIndex + 1] = clampedValue; // G
+        data[pixelIndex + 2] = clampedValue; // B
+      }
+    }
+  }
+
+  // 適応的二値化を適用
+  private applyAdaptiveBinarization(
+    data: Uint8ClampedArray,
+    width: number,
+    height: number
+  ): void {
+    // グレースケール値を抽出
+    const grayValues: number[] = [];
+    for (let i = 0; i < data.length; i += 4) {
+      grayValues.push(data[i]); // すでにグレースケール化されている
+    }
+
+    // 局所的適応閾値処理
+    const blockSize = 15; // ブロックサイズ
+    const C = 10; // 定数値
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const pixelIndex = y * width + x;
+
+        // 局所領域の平均値を計算
+        let sum = 0;
+        let count = 0;
+
+        const startY = Math.max(0, y - Math.floor(blockSize / 2));
+        const endY = Math.min(height - 1, y + Math.floor(blockSize / 2));
+        const startX = Math.max(0, x - Math.floor(blockSize / 2));
+        const endX = Math.min(width - 1, x + Math.floor(blockSize / 2));
+
+        for (let by = startY; by <= endY; by++) {
+          for (let bx = startX; bx <= endX; bx++) {
+            sum += grayValues[by * width + bx];
+            count++;
+          }
+        }
+
+        const threshold = (sum / count) - C;
+        const binaryValue = grayValues[pixelIndex] > threshold ? 255 : 0;
+
+        const dataIndex = pixelIndex * 4;
+        data[dataIndex] = binaryValue;     // R
+        data[dataIndex + 1] = binaryValue; // G
+        data[dataIndex + 2] = binaryValue; // B
+      }
+    }
+  }
+
+  // Otsu の閾値計算（簡易版）- 将来的に使用可能
   private calculateOtsuThreshold(grayValues: number[]): number {
     const histogram = new Array(256).fill(0);
     grayValues.forEach(val => histogram[val]++);
@@ -598,7 +786,7 @@ export class OCRService {
         // 1. 前処理ステージ
         const preprocessStart = performance.now();
         const processedImage = config.preprocessingEnabled
-          ? await this.preprocessImage(testImage)
+          ? await this.preprocessImage(testImage, config.preprocessingOptions)
           : testImage;
         stageBreakdown.preprocessing = performance.now() - preprocessStart;
 
@@ -759,6 +947,8 @@ export class OCRService {
   }> {
     const standardConfig: OCRConfig = {
       language: 'eng+jpn',
+      psm: 6,
+      oem: 3,
       preprocessingEnabled: true,
       confidenceThreshold: 0.6,
       ...config,

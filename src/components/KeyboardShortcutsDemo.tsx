@@ -20,6 +20,7 @@ const defaultSettings: AppSettings = {
     psm: 3,
     oem: 1,
     preprocessingEnabled: true,
+    confidenceThreshold: 0.6,
   },
   translation: {
     apiKey: '',

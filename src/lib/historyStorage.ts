@@ -13,6 +13,7 @@ interface TranslationHistoryItem {
   imageHash?: string
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 interface HistoryMetadata {
   version: number
   lastCleanup: number
