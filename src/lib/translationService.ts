@@ -21,27 +21,271 @@ export interface DeepLLanguagesResponse {
   }>;
 }
 
+// キューアイテムの型定義
+interface TranslationQueueItem {
+  id: string;
+  request: TranslationRequest;
+  priority: 'high' | 'normal' | 'low';
+  resolve: (value: string) => void;
+  reject: (error: Error) => void;
+  timestamp: number;
+  retryCount: number;
+}
+
+// 再試行戦略の設定
+interface RetryConfig {
+  maxRetries: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+  backoffMultiplier: number;
+}
+
 export class TranslationService {
   private apiKey: string | null = null;
   private baseUrl = 'https://api-free.deepl.com'; // Free tier URL
   private rateLimiter: RateLimiter;
   private requestCount = 0;
   private characterCount = 0;
+  private translationQueue: TranslationQueueItem[] = [];
+  private isProcessingQueue = false;
+  private retryStrategy: RetryStrategy;
 
   constructor(private config?: Partial<TranslationConfig>) {
     this.rateLimiter = new RateLimiter(500, 60000); // 500 requests per minute
+    this.retryStrategy = new RetryStrategy({
+      maxRetries: 3,
+      baseDelayMs: 1000,
+      maxDelayMs: 30000,
+      backoffMultiplier: 2,
+    });
+    this.initializeApiKey();
+  }
+
+  // APIキーを安全に初期化
+  private async initializeApiKey(): Promise<void> {
+    try {
+      // Tauri Store から暗号化されたAPIキーを読み込み
+      const encryptedApiKey = await this.getStoredApiKey();
+      if (encryptedApiKey) {
+        this.apiKey = await this.decryptApiKey(encryptedApiKey);
+        this.updateBaseUrl();
+      }
+    } catch (error) {
+      console.warn('Failed to load API key from storage:', error);
+    }
+  }
+
+  // 暗号化されたAPIキーを保存
+  async setAndStoreApiKey(apiKey: string): Promise<void> {
+    try {
+      const encrypted = await this.encryptApiKey(apiKey);
+      await this.storeApiKey(encrypted);
+      this.setApiKey(apiKey);
+    } catch (error) {
+      console.error('Failed to store API key:', error);
+      throw new Error('API key storage failed');
+    }
+  }
+
+  // APIキーを暗号化（簡易実装）
+  private async encryptApiKey(apiKey: string): Promise<string> {
+    // 本来はより強固な暗号化を実装すべき
+    // 現在は base64 エンコーディングのみ
+    return btoa(apiKey);
+  }
+
+  // APIキーを復号化
+  private async decryptApiKey(encryptedApiKey: string): Promise<string> {
+    try {
+      return atob(encryptedApiKey);
+    } catch {
+      throw new Error('Invalid encrypted API key');
+    }
+  }
+
+  // APIキーをストレージに保存（Tauri Store使用予定）
+  private async storeApiKey(encryptedApiKey: string): Promise<void> {
+    // TODO: Tauri plugin-store の実装
+    localStorage.setItem('deepl_api_key_encrypted', encryptedApiKey);
+  }
+
+  // ストレージからAPIキーを取得
+  private async getStoredApiKey(): Promise<string | null> {
+    // TODO: Tauri plugin-store の実装
+    return localStorage.getItem('deepl_api_key_encrypted');
+  }
+
+  // ベースURLを更新
+  private updateBaseUrl(): void {
+    if (this.apiKey && this.apiKey.endsWith(':fx')) {
+      this.baseUrl = 'https://api-free.deepl.com';
+    } else {
+      this.baseUrl = 'https://api.deepl.com';
+    }
   }
 
   // API キーを設定
   setApiKey(apiKey: string): void {
     this.apiKey = apiKey;
+    this.updateBaseUrl();
+  }
 
-    // API キーに基づいてベースURLを決定
-    if (apiKey.endsWith(':fx')) {
-      this.baseUrl = 'https://api-free.deepl.com';
-    } else {
-      this.baseUrl = 'https://api.deepl.com';
+  // キューイング翻訳（優先度付き）
+  async queueTranslation(
+    request: TranslationRequest,
+    priority: 'high' | 'normal' | 'low' = 'normal'
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const queueItem: TranslationQueueItem = {
+        id: this.generateRequestId(),
+        request,
+        priority,
+        resolve,
+        reject,
+        timestamp: Date.now(),
+        retryCount: 0,
+      };
+
+      // 優先度に基づいてキューに挿入
+      this.insertIntoQueue(queueItem);
+
+      // キュー処理開始
+      this.processQueue();
+    });
+  }
+
+  // バッチ翻訳
+  async translateBatch(
+    requests: TranslationRequest[],
+    batchSize: number = 5
+  ): Promise<Array<ApiResponse<TranslationResult>>> {
+    const results: Array<ApiResponse<TranslationResult>> = [];
+
+    for (let i = 0; i < requests.length; i += batchSize) {
+      const batch = requests.slice(i, i + batchSize);
+
+      // バッチを並列処理
+      const batchPromises = batch.map(request =>
+        this.translateWithRetry(request)
+      );
+
+      try {
+        const batchResults = await Promise.allSettled(batchPromises);
+
+        batchResults.forEach((result, index) => {
+          if (result.status === 'fulfilled') {
+            results.push(result.value);
+          } else {
+            results.push({
+              success: false,
+              error: {
+                code: 'BATCH_TRANSLATION_ERROR',
+                message: `Batch item ${i + index} failed: ${result.reason}`,
+                context: 'translation',
+                timestamp: new Date(),
+                details: result.reason,
+              },
+            });
+          }
+        });
+
+        // バッチ間で少し待機
+        if (i + batchSize < requests.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      } catch (error) {
+        console.error(`Batch ${i / batchSize + 1} failed:`, error);
+
+        // バッチ全体が失敗した場合
+        for (let j = 0; j < batch.length; j++) {
+          results.push({
+            success: false,
+            error: {
+              code: 'BATCH_PROCESSING_ERROR',
+              message: `Batch processing failed: ${error}`,
+              context: 'translation',
+              timestamp: new Date(),
+              details: error,
+            },
+          });
+        }
+      }
     }
+
+    return results;
+  }
+
+  // 再試行付き翻訳
+  private async translateWithRetry(request: TranslationRequest): Promise<ApiResponse<TranslationResult>> {
+    return this.retryStrategy.execute(async () => {
+      const result = await this.translateText(request);
+
+      // エラーが再試行可能かチェック
+      if (!result.success && result.error) {
+        const isRetryable = result.error.details?.retryable ||
+          ['DEEPL_RATE_LIMIT_EXCEEDED', 'DEEPL_SERVICE_UNAVAILABLE'].includes(result.error.code);
+
+        if (isRetryable) {
+          throw new RetryableError(result.error.message);
+        } else {
+          // 再試行不可能なエラーは即座に返す
+          throw new NonRetryableError(result.error.message);
+        }
+      }
+
+      return result;
+    });
+  }
+
+  // キューに挿入（優先度順）
+  private insertIntoQueue(item: TranslationQueueItem): void {
+    const priorityOrder = { high: 0, normal: 1, low: 2 };
+
+    let insertIndex = this.translationQueue.length;
+
+    for (let i = 0; i < this.translationQueue.length; i++) {
+      if (priorityOrder[item.priority] < priorityOrder[this.translationQueue[i].priority]) {
+        insertIndex = i;
+        break;
+      }
+    }
+
+    this.translationQueue.splice(insertIndex, 0, item);
+  }
+
+  // キュー処理
+  private async processQueue(): Promise<void> {
+    if (this.isProcessingQueue || this.translationQueue.length === 0) {
+      return;
+    }
+
+    this.isProcessingQueue = true;
+
+    while (this.translationQueue.length > 0) {
+      const item = this.translationQueue.shift()!;
+
+      try {
+        const result = await this.translateWithRetry(item.request);
+
+        if (result.success && result.data) {
+          item.resolve(result.data.translatedText);
+        } else {
+          item.reject(new Error(result.error?.message || 'Translation failed'));
+        }
+      } catch (error) {
+        item.reject(error);
+      }
+
+      // キュー処理間隔
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
+    this.isProcessingQueue = false;
+  }
+
+  // リクエストID生成
+  private generateRequestId(): string {
+    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
 
   // 翻訳実行
@@ -387,6 +631,68 @@ class RateLimiter {
 
   reset(): void {
     this.requests = [];
+  }
+}
+
+// 再試行戦略クラス
+class RetryStrategy {
+  constructor(private config: RetryConfig) {}
+
+  async execute<T>(operation: () => Promise<T>): Promise<T> {
+    let lastError: Error;
+
+    for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error as Error;
+
+        // 最後の試行または再試行不可能なエラーの場合
+        if (attempt === this.config.maxRetries || error instanceof NonRetryableError) {
+          throw lastError;
+        }
+
+        // 再試行可能なエラーの場合、待機時間を計算
+        if (error instanceof RetryableError) {
+          const delay = this.calculateDelay(attempt);
+          console.warn(`Retry attempt ${attempt + 1}/${this.config.maxRetries} after ${delay}ms:`, error.message);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        } else {
+          // 未知のエラーも再試行する
+          const delay = this.calculateDelay(attempt);
+          console.warn(`Retry attempt ${attempt + 1}/${this.config.maxRetries} for unknown error after ${delay}ms:`, error);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    throw lastError!;
+  }
+
+  private calculateDelay(attempt: number): number {
+    const delay = this.config.baseDelayMs * Math.pow(this.config.backoffMultiplier, attempt);
+
+    // ジッター追加（±20%）
+    const jitter = delay * 0.2 * (Math.random() - 0.5);
+    const finalDelay = Math.min(delay + jitter, this.config.maxDelayMs);
+
+    return Math.max(finalDelay, 0);
+  }
+}
+
+// 再試行可能エラー
+class RetryableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RetryableError';
+  }
+}
+
+// 再試行不可能エラー
+class NonRetryableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NonRetryableError';
   }
 }
 
