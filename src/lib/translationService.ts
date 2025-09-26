@@ -1,5 +1,6 @@
 // DeepL API 抽象化レイヤー
 import { TranslationRequest, TranslationResult, TranslationConfig, ApiResponse } from '../types';
+import { ErrorCodes, mapHttpStatusToErrorCode, messageForStatus } from './errorCodes';
 
 export interface DeepLApiResponse {
   translations: Array<{
@@ -179,7 +180,7 @@ export class TranslationService {
             results.push({
               success: false,
               error: {
-                code: 'BATCH_TRANSLATION_ERROR',
+                code: ErrorCodes.BATCH_TRANSLATION_ERROR,
                 message: `Batch item ${i + index} failed: ${result.reason}`,
                 context: 'translation',
                 timestamp: new Date(),
@@ -201,7 +202,7 @@ export class TranslationService {
           results.push({
             success: false,
             error: {
-              code: 'BATCH_PROCESSING_ERROR',
+              code: ErrorCodes.BATCH_PROCESSING_ERROR,
               message: `Batch processing failed: ${error}`,
               context: 'translation',
               timestamp: new Date(),
@@ -222,8 +223,9 @@ export class TranslationService {
 
       // エラーが再試行可能かチェック
       if (!result.success && result.error) {
-        const isRetryable = result.error.details?.retryable ||
-          ['DEEPL_RATE_LIMIT_EXCEEDED', 'DEEPL_SERVICE_UNAVAILABLE'].includes(result.error.code);
+        const retryableCodes: string[] = [ErrorCodes.DEEPL_RATE_LIMIT_EXCEEDED, ErrorCodes.DEEPL_SERVICE_UNAVAILABLE] as string[];
+        const details = (result.error.details ?? {}) as { retryable?: boolean };
+        const isRetryable = Boolean(details.retryable) || retryableCodes.includes(result.error.code as string);
 
         if (isRetryable) {
           throw new RetryableError(result.error.message);
@@ -273,7 +275,7 @@ export class TranslationService {
           item.reject(new Error(result.error?.message || 'Translation failed'));
         }
       } catch (error) {
-        item.reject(error);
+        item.reject(error as Error);
       }
 
       // キュー処理間隔
@@ -311,7 +313,7 @@ export class TranslationService {
         throw new DeepLApiError(
           await response.text(),
           response.status,
-          this.getErrorMessage(response.status)
+          messageForStatus(response.status)
         );
       }
 
@@ -360,7 +362,7 @@ export class TranslationService {
       return {
         success: false,
         error: {
-          code: 'TRANSLATION_ERROR',
+          code: ErrorCodes.TRANSLATION_ERROR,
           message: `Translation failed: ${error}`,
           context: 'translation',
           timestamp: new Date(),
@@ -479,17 +481,7 @@ export class TranslationService {
 
   // エラーメッセージを取得
   private getErrorMessage(statusCode: number): string {
-    const messages: Record<number, string> = {
-      400: 'Bad request. Please check your request parameters.',
-      403: 'Forbidden. Invalid API key or insufficient permissions.',
-      404: 'Resource not found.',
-      413: 'Request entity too large. Text is too long.',
-      429: 'Too many requests. Rate limit exceeded.',
-      456: 'Quota exceeded. You have reached your usage limit.',
-      503: 'Service unavailable. Please try again later.',
-    };
-
-    return messages[statusCode] || `HTTP ${statusCode} error`;
+    return messageForStatus(statusCode);
   }
 
   // 使用量を取得
@@ -519,7 +511,7 @@ export class TranslationService {
       return {
         success: false,
         error: {
-          code: 'USAGE_FETCH_ERROR',
+          code: ErrorCodes.USAGE_FETCH_ERROR,
           message: `Failed to fetch usage: ${error}`,
           context: 'translation',
           timestamp: new Date(),
@@ -555,7 +547,7 @@ export class TranslationService {
       return {
         success: false,
         error: {
-          code: 'LANGUAGES_FETCH_ERROR',
+          code: ErrorCodes.LANGUAGES_FETCH_ERROR,
           message: `Failed to fetch supported languages: ${error}`,
           context: 'translation',
           timestamp: new Date(),
@@ -708,17 +700,7 @@ export class DeepLApiError extends Error {
   }
 
   get code(): string {
-    const codeMapping: Record<number, string> = {
-      400: 'DEEPL_BAD_REQUEST',
-      403: 'DEEPL_FORBIDDEN',
-      404: 'DEEPL_NOT_FOUND',
-      413: 'DEEPL_TEXT_TOO_LARGE',
-      429: 'DEEPL_RATE_LIMIT_EXCEEDED',
-      456: 'DEEPL_QUOTA_EXCEEDED',
-      503: 'DEEPL_SERVICE_UNAVAILABLE',
-    };
-
-    return codeMapping[this.statusCode] || 'DEEPL_UNKNOWN_ERROR';
+    return mapHttpStatusToErrorCode(this.statusCode);
   }
 
   isRetryable(): boolean {
